@@ -1,0 +1,224 @@
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parth's Secure Vault</title>
+    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <style>
+        :root { 
+            --bg-color: #ffffff; 
+            --sender-bubble: #FFFDD0; 
+            --receiver-bubble: #E8E8E0; 
+            --btn-color: #000000;
+            --btn-text: #F5F5DC;
+            --app-border: #000000;
+        }
+
+        body { 
+            font-family: -apple-system, sans-serif; 
+            background: #121212; 
+            margin: 0; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            height: 100vh; 
+            overflow: hidden; 
+        }
+
+        #app-container {
+            background: var(--bg-color);
+            border: 4px solid var(--app-border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 0 50px rgba(0,0,0,0.8);
+        }
+
+        /* --- RESPONSIVE LOGIC --- */
+        @media (max-width: 768px) {
+            #app-container { width: 98vw; height: 95vh; border-radius: 20px; }
+            #side-panel { display: none; } /* Hide side panel on mobile */
+            #mobile-video { display: grid; grid-template-columns: 1fr 1fr; background: #000; padding: 5px; gap: 5px; }
+            .pc-only { display: none !important; }
+        }
+
+        @media (min-width: 769px) {
+            #app-container { width: 950px; height: 650px; flex-direction: row; border-radius: 12px; }
+            #side-panel { width: 320px; background: #000; display: flex; flex-direction: column; border-right: 2px solid var(--app-border); }
+            #chat-section { flex-grow: 1; display: flex; flex-direction: column; }
+            #mobile-video { display: none; }
+            video { height: 200px !important; }
+        }
+
+        /* Video Styling */
+        video { width: 100%; object-fit: cover; border-radius: 4px; background: #222; }
+        #video-grid { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+
+        /* Auth Overlay */
+        #auth-overlay { position: fixed; inset: 0; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 2000; color: white; }
+        .auth-card { background: #1a1a1a; padding: 25px; border-radius: 15px; width: 300px; text-align: center; border: 1px solid #333; }
+        
+        /* Chat UI */
+        .header { background: var(--btn-color); color: var(--btn-text); padding: 12px; text-align: center; font-weight: bold; font-size: 13px; }
+        #chat-box { flex-grow: 1; background: var(--bg-color); overflow-y: auto; padding: 15px; display: flex; flex-direction: column; }
+        .controls { background: #f9f9f9; padding: 15px; border-top: 1px solid #ddd; }
+        
+        /* Bubbles */
+        .msg { margin-bottom: 10px; padding: 10px; border-radius: 12px; max-width: 80%; font-size: 15px; }
+        .you { align-self: flex-end; background: var(--sender-bubble); border: 1px solid #e0dbb0; color: #000; }
+        .peer { align-self: flex-start; background: var(--receiver-bubble); border: 1px solid #d0d0c8; color: #000; }
+
+        .row { display: flex; gap: 5px; margin-bottom: 5px; }
+        input, button { padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px; }
+        button { cursor: pointer; background: var(--btn-color); color: var(--btn-text); border: none; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="auth-overlay">
+        <div class="auth-card">
+            <h2 style="color:var(--btn-text)">VAULT</h2>
+            <input type="password" id="login-pass" placeholder="Password" style="width:80%; margin-bottom:10px; background:#000; color:#fff; border:1px solid #444;">
+            <button onclick="doLogin()" style="width:90%">UNLOCK</button>
+        </div>
+    </div>
+
+    <div id="app-container">
+        <div id="side-panel">
+            <div class="header">LIVE STREAM</div>
+            <div id="video-grid">
+                <video id="pc-local" autoplay muted playsinline></video>
+                <video id="pc-remote" autoplay playsinline></video>
+                <button class="pc-only" onclick="shareScreen()" style="background:#444;">🖥️ SHARE SCREEN</button>
+            </div>
+        </div>
+
+        <div id="chat-section">
+            <div id="mobile-video">
+                <video id="mob-local" autoplay muted playsinline></video>
+                <video id="mob-remote" autoplay playsinline></video>
+            </div>
+            <div class="header">ID: <span id="my-id">...</span></div>
+            <div id="chat-box"></div>
+            <div class="controls">
+                <div class="row">
+                    <input type="number" id="target-id" class="flex-1" placeholder="Partner ID">
+                    <button onclick="linkPeer()">LINK</button>
+                </div>
+                <div class="row">
+                    <button class="flex-1" onclick="makeCall()">VIDEO CALL</button>
+                    <button style="background:#8B0000; color:white;" onclick="triggerWipe()">WIPE ALL</button>
+                </div>
+                <div class="row">
+                    <input type="text" id="text-input" class="flex-1" placeholder="Message...">
+                    <button onclick="sendText()">SEND</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let peer, conn, localStream;
+        const myPeerId = Math.floor(1000000000 + Math.random() * 9000000000).toString();
+
+        function doLogin() {
+            const p = document.getElementById('login-pass').value;
+            if(!localStorage.getItem("v_pass")) localStorage.setItem("v_pass", p);
+            if(p === localStorage.getItem("v_pass")) {
+                document.getElementById('auth-overlay').style.display = 'none';
+                initPeer();
+                loadHistory();
+            } else { alert("Wrong Password"); }
+        }
+
+        function initPeer() {
+            peer = new Peer(myPeerId, { config: { 'iceServers': [{ urls: 'stun:stun.l.google.com:19302' }] } });
+            peer.on('open', id => document.getElementById('my-id').innerText = id);
+            peer.on('connection', c => { conn = c; handleConn(); });
+            peer.on('call', async call => {
+                const stream = await navigator.mediaDevices.getUserMedia({video:true, audio:true});
+                setLocalStream(stream);
+                call.answer(stream);
+                call.on('stream', s => setRemoteStream(s));
+            });
+        }
+
+        function setLocalStream(s) {
+            localStream = s;
+            document.getElementById('pc-local').srcObject = s;
+            document.getElementById('mob-local').srcObject = s;
+        }
+
+        function setRemoteStream(s) {
+            document.getElementById('pc-remote').srcObject = s;
+            document.getElementById('mob-remote').srcObject = s;
+        }
+
+        async function shareScreen() {
+            try {
+                const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                setLocalStream(screenStream);
+                // If a call is active, you would normally replace the track here. 
+                // For simplicity in this P2P version, restart the call with screenStream.
+                alert("Screen sharing started. Click VIDEO CALL to show partner.");
+            } catch (e) { console.error(e); }
+        }
+
+        function linkPeer() {
+            const tid = document.getElementById('target-id').value;
+            conn = peer.connect(tid, { reliable: true });
+            handleConn();
+        }
+
+        function handleConn() {
+            conn.on('open', () => {
+                appendMsg("System", "Linked", "peer");
+                conn.on('data', data => {
+                    if(data === "WIPE") clearLocal();
+                    else appendMsg("Peer", data, "peer");
+                });
+            });
+        }
+
+        function sendText() {
+            const val = document.getElementById('text-input').value;
+            if(conn && val) {
+                conn.send(val);
+                appendMsg("You", val, "you");
+                document.getElementById('text-input').value = "";
+            }
+        }
+
+        function appendMsg(sender, text, cls) {
+            const box = document.getElementById('chat-box');
+            box.innerHTML += `<div class="msg ${cls}"><b>${sender}</b><br>${text}</div>`;
+            localStorage.setItem("v_chat", box.innerHTML);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function loadHistory() {
+            const h = localStorage.getItem("v_chat");
+            if(h) document.getElementById('chat-box').innerHTML = h;
+        }
+
+        function triggerWipe() {
+            if(conn) conn.send("WIPE");
+            clearLocal();
+        }
+
+        function clearLocal() {
+            localStorage.removeItem("v_chat");
+            document.getElementById('chat-box').innerHTML = "";
+        }
+
+        async function makeCall() {
+            const tid = document.getElementById('target-id').value;
+            const stream = localStream || await navigator.mediaDevices.getUserMedia({video:true, audio:true});
+            setLocalStream(stream);
+            const call = peer.call(tid, stream);
+            call.on('stream', s => setRemoteStream(s));
+        }
+    </script>
+</body>
+</html>
